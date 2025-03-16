@@ -5,6 +5,7 @@ import os.path as osp
 
 # RGBD-Dataset
 from .tartan import TartanAir
+from .kubric import KubricStatic, KubricDynamic
 
 from .stream import ImageStream
 from .stream import StereoStream
@@ -19,7 +20,11 @@ def dataset_factory(dataset_list, **kwargs):
 
     from torch.utils.data import ConcatDataset
 
-    dataset_map = { 'tartan': (TartanAir, ) }
+    dataset_map = { 
+        'tartan': (TartanAir, ), 
+        'kubric_static': (KubricStatic, ),
+        'kubric_dynamic': (KubricDynamic, ),               
+    }
     db_list = []
     for key in dataset_list:
         # cache datasets for faster future loading
