@@ -15,20 +15,20 @@ from .stream import RGBDStream
 from .tartan import TartanAirStream
 from .tartan import TartanAirTestStream
 
-def dataset_factory(dataset_list, **kwargs):
+def dataset_factory(dataset_list, datapath, **kwargs):
     """ create a combined dataset """
 
     from torch.utils.data import ConcatDataset
 
     dataset_map = { 
-        'tartan': (TartanAir, ), 
-        'kubric_static': (KubricStatic, ),
-        'kubric_dynamic': (KubricDynamic, ),               
+        'tartan': (TartanAir, 'TartanAir'), 
+        'kubric_static': (KubricStatic, 'KubricStatic'),
+        'kubric_dynamic': (KubricDynamic, 'KubricDynamic'),               
     }
     db_list = []
     for key in dataset_list:
         # cache datasets for faster future loading
-        db = dataset_map[key][0](**kwargs)
+        db = dataset_map[key][0](datapath=osp.join(datapath, dataset_map[key][1]), **kwargs)
 
         print("Dataset {} has {} images".format(key, len(db)))
         db_list.append(db)
