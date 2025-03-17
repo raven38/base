@@ -79,6 +79,7 @@ def train_stage1(gpu, args):
             optimizer.zero_grad()
 
             images, poses, disps, intrinsics, *optinal_data = [x.to('cuda') if x is not None else None for x in item]
+            mono_depth = None
             if len(optinal_data) > 0:
                 mono_depth = optinal_data[0]
 
