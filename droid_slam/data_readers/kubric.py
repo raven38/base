@@ -43,6 +43,8 @@ class KubricStatic(RGBDDataset):
             with open(osp.join(scene, 'metadata.json')) as f:
                 metadata = json.load(f)
             cam = metadata['camera']
+            print(metadata.keys())
+            print(cam.keys())
             W, H = metadata['metadata']['resolution']
             K = cam['K']
             poses = np.array(cam['poses'])
