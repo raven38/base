@@ -47,9 +47,9 @@ class KubricStatic(RGBDDataset):
             print(cam.keys())
             W, H = metadata['metadata']['resolution']
             K = cam['K']
-            poses = np.array(cam['poses'])
+            positions = np.array(cam['positions'])
             quaternions = np.array(cam['quaternions'])
-            poses = np.concatenate([poses, quaternions], axis=1)
+            poses = np.concatenate([positions, quaternions], axis=1)
             poses[:, [1, 2]] = -poses[:, [1, 2]] # up to down, forward to backward
             poses[:, [4, 5]] = -poses[:, [4, 5]] # up to down, forward to backward
             poses[:,:3] /= KubricStatic.DEPTH_SCALE
@@ -114,9 +114,9 @@ class KubricDynamic(RGBDMotionDataset):
             cam = metadata['camera']
             W, H = metadata['metadata']['resolution']
             K = cam['K']
-            poses = np.array(cam['poses'])
+            positions = np.array(cam['positions'])
             quaternions = np.array(cam['quaternions'])
-            poses = np.concatenate([poses, quaternions], axis=1)
+            poses = np.concatenate([positions, quaternions], axis=1)
             poses[:, [1, 2]] = -poses[:, [1, 2]] # up to down, forward to backward
             poses[:, [4, 5]] = -poses[:, [4, 5]] # up to down, forward to backward
             poses[:,:3] /= KubricStatic.DEPTH_SCALE
@@ -206,9 +206,9 @@ class KubricStaticTestStream(RGBDStream):
         cam = metadata['camera']
         W, H = metadata['metadata']['resolution']
         K = cam['K']
-        poses = np.array(cam['poses'])
+        positions = np.array(cam['positions'])
         quaternions = np.array(cam['quaternions'])
-        poses = np.concatenate([poses, quaternions], axis=1)
+        poses = np.concatenate([positions, quaternions], axis=1)
         poses[:, [1, 2]] = -poses[:, [1, 2]] # up to down, forward to backward
         poses[:, [4, 5]] = -poses[:, [4, 5]] # up to down, forward to backward
         field_of_view = cam['field_of_view']
