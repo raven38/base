@@ -43,8 +43,6 @@ class KubricStatic(RGBDDataset):
             with open(osp.join(scene, 'metadata.json')) as f:
                 metadata = json.load(f)
             cam = metadata['camera']
-            print(metadata.keys())
-            print(cam.keys())
             W, H = metadata['metadata']['resolution']
             K = cam['K']
             positions = np.array(cam['positions'])
@@ -59,8 +57,9 @@ class KubricStatic(RGBDDataset):
             fy = 0.5 * H / np.tan(0.5 * float(field_of_view))
             cx = 0.5 * W
             cy = 0.5 * H
-            intrinsics = np.array([fx, fy, cx, cy]) * len(images)
+            intrinsics = [np.array([fx, fy, cx, cy])] * len(images)
             # graph of co-visible frames based on flow
+
             graph = self.build_frame_graph(poses, depths, intrinsics)
 
             scene = '/'.join(scene.split('/'))
@@ -126,7 +125,7 @@ class KubricDynamic(RGBDMotionDataset):
             fy = 0.5 * H / np.tan(0.5 * float(field_of_view))
             cx = 0.5 * W
             cy = 0.5 * H
-            intrinsics = np.array([fx, fy, cx, cy]) * len(images)
+            intrinsics = [np.array([fx, fy, cx, cy])] * len(images)
 
             # graph of co-visible frames based on flow
             graph = self.build_frame_graph(poses, depths, intrinsics)
@@ -217,7 +216,7 @@ class KubricStaticTestStream(RGBDStream):
         fy = 0.5 * H / np.tan(0.5 * float(field_of_view))
         cx = 0.5 * W
         cy = 0.5 * H
-        intrinsic = np.array([fx, fy, cx, cy]) * len(images)
+        intrinsic = [np.array([fx, fy, cx, cy])] * len(images)
 
         poses = SE3(torch.as_tensor(poses))
         poses = poses[[0]].inv() * poses
