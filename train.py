@@ -40,7 +40,7 @@ def show_image(image):
     cv2.imshow('image', image / 255.0)
     cv2.waitKey()
 
-def train(gpu, args):
+def train_stage1(gpu, args):
     """ Test to make sure project transform correctly maps points """
 
     # coordinate multiple GPUs
@@ -58,7 +58,7 @@ def train(gpu, args):
         model.load_state_dict(torch.load(args.ckpt))
 
     # fetch dataloader
-    db = dataset_factory(['tartan'], datapath=args.datapath, n_frames=args.n_frames, fmin=args.fmin, fmax=args.fmax)
+    db = dataset_factory(['tartan', 'kubric_static'], datapath=args.datapath, n_frames=args.n_frames, fmin=args.fmin, fmax=args.fmax)
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         db, shuffle=True, num_replicas=args.world_size, rank=gpu)
@@ -68,7 +68,7 @@ def train(gpu, args):
     # fetch optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 
-        args.lr, args.steps, pct_start=0.01, cycle_momentum=False)
+        args.lr, args.steps1, pct_start=0.01, cycle_momentum=False)
 
     logger = Logger(args.name, scheduler)
     should_keep_training = True
@@ -78,7 +78,9 @@ def train(gpu, args):
         for i_batch, item in enumerate(train_loader):
             optimizer.zero_grad()
 
-            images, poses, disps, intrinsics = [x.to('cuda') for x in item]
+            images, poses, disps, intrinsics, *optinal_data = [x.to('cuda') if x is not None else None for x in item]
+            if len(optinal_data) > 0:
+                mono_depth = optinal_data[0]
 
             # convert poses w2c -> c2w
             Ps = SE3(poses).inv()
@@ -96,7 +98,10 @@ def train(gpu, args):
             # fix first to camera poses
             Gs.data[:,0] = Ps.data[:,0].clone()
             Gs.data[:,1:] = Ps.data[:,[1]].clone()
-            disp0 = torch.ones_like(disps[:,:,3::8,3::8])
+            if mono_depth is None:
+                disp0 = torch.ones_like(disps[:,:,3::8,3::8])
+            else:
+                disp0 = mono_depth[:,:,3::8,3::8].detach()
 
             # perform random restarts
             r = 0
@@ -132,15 +137,125 @@ def train(gpu, args):
                 logger.push(metrics)
 
             if total_steps % 10000 == 0 and gpu == 0:
-                PATH = 'checkpoints/%s_%06d.pth' % (args.name, total_steps)
+                PATH = 'checkpoints/%s_stage1_%06d.pth' % (args.name, total_steps)
                 torch.save(model.state_dict(), PATH)
 
-            if total_steps >= args.steps:
+            if total_steps >= args.steps1:
                 should_keep_training = False
                 break
 
     dist.destroy_process_group()
+    return PATH
                 
+def train_stage2(gpu, args):
+    """ Test to make sure project transform correctly maps points """
+
+    # coordinate multiple GPUs
+    setup_ddp(gpu, args)
+    rng = np.random.default_rng(12345)
+
+    N = args.n_frames
+    model = DroidNet()
+    model.cuda()
+    model.train()
+
+    model = DDP(model, device_ids=[gpu], find_unused_parameters=False)
+
+    if args.ckpt is not None:
+        model.load_state_dict(torch.load(args.ckpt))
+
+    # fetch dataloader
+    db = dataset_factory(['kubric_dynamic'], datapath=args.datapath, n_frames=args.n_frames, fmin=args.fmin, fmax=args.fmax)
+
+    train_sampler = torch.utils.data.distributed.DistributedSampler(
+        db, shuffle=True, num_replicas=args.world_size, rank=gpu)
+
+    train_loader = DataLoader(db, batch_size=args.batch, sampler=train_sampler, num_workers=2)
+
+    # fetch optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 
+        args.lr, args.steps2, pct_start=0.01, cycle_momentum=False)
+
+    logger = Logger(args.name, scheduler)
+    should_keep_training = True
+    total_steps = 0
+
+    while should_keep_training:
+        for i_batch, item in enumerate(train_loader):
+            optimizer.zero_grad()
+
+            images, poses, disps, intrinsics, *optional_data = [x.to('cuda') if x is not None else None for x in item]
+            if len(optional_data) > 0:
+                motion_masks = optional_data[-1]
+            if len(optional_data) > 1:
+                mono_depth = optional_data[-2]
+
+            # convert poses w2c -> c2w
+            Ps = SE3(poses).inv()
+            Gs = SE3.IdentityLike(Ps)
+            Ms = motion_masks
+            # randomize frame graph
+            if np.random.rand() < 0.5:
+                graph = build_frame_graph(poses, disps, intrinsics, num=args.edges)
+            
+            else:
+                graph = OrderedDict()
+                for i in range(N):
+                    graph[i] = [j for j in range(N) if i!=j and abs(i-j) <= 2]
+            
+            # fix first to camera poses
+            Gs.data[:,0] = Ps.data[:,0].clone()
+            Gs.data[:,1:] = Ps.data[:,[1]].clone()
+            if mono_depth is None:
+                disp0 = torch.ones_like(disps[:,:,3::8,3::8])
+            else:
+                disp0 = mono_depth[:,:,3::8,3::8].detach()
+
+            # perform random restarts
+            r = 0
+            while r < args.restart_prob:
+                r = rng.random()
+                
+                intrinsics0 = intrinsics / 8.0
+                poses_est, disps_est, residuals, mot_prob, refined_w = model(Gs, images, disp0, intrinsics0, 
+                    graph, num_steps=args.iters, fixedp=2)
+
+                geo_loss, geo_metrics = losses.geodesic_loss(Ps, poses_est, graph, do_scale=False)
+                motion_loss, mot_metrics = losses.motion_loss(Ms, refined_w)
+
+                loss = args.w1 * geo_loss + args.w4 * motion_loss
+                loss.backward()
+
+                Gs = poses_est[-1].detach()
+                disp0 = disps_est[-1][:,:,3::8,3::8].detach()
+
+            metrics = {}
+            metrics.update(geo_metrics)
+            metrics.update(mot_metrics)
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            optimizer.step()
+            scheduler.step()
+            
+            total_steps += 1
+
+            if gpu == 0:
+                logger.push(metrics)
+
+            if total_steps % 10000 == 0 and gpu == 0:
+                PATH = 'checkpoints/%s_stage2_%06d.pth' % (args.name, total_steps)
+                torch.save(model.state_dict(), PATH)
+
+            if total_steps >= args.steps2:
+                should_keep_training = False
+                break
+
+    dist.destroy_process_group()
+    if gpu == 0:
+        PATH = 'checkpoints/%s_final.pth' % (args.name, total_steps)
+        torch.save(model.state_dict(), PATH)
+
 
 if __name__ == '__main__':
     import argparse
@@ -153,7 +268,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--batch', type=int, default=1)
     parser.add_argument('--iters', type=int, default=15)
-    parser.add_argument('--steps', type=int, default=250000)
+    parser.add_argument('--steps1', type=int, default=100000)
+    parser.add_argument('--steps2', type=int, default=150000)
     parser.add_argument('--lr', type=float, default=0.00025)
     parser.add_argument('--clip', type=float, default=2.5)
     parser.add_argument('--n_frames', type=int, default=7)
@@ -183,5 +299,6 @@ if __name__ == '__main__':
 
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12356'
-    mp.spawn(train, nprocs=args.gpus, args=(args,))
+    args.ckpt = mp.spawn(train_stage1, nprocs=args.gpus, args=(args,))
+    mp.spawn(train_stage2, nprocs=args.gpus, args=(args,))
 

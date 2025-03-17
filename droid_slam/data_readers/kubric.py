@@ -34,16 +34,29 @@ class KubricStatic(RGBDDataset):
         print("Building KubricStatic dataset")
 
         scene_info = {}
-        scenes = glob.glob(osp.join(self.root, '*/*/*/*'))
+        scenes = glob.glob(osp.join(self.root, '*'))
         for scene in tqdm(sorted(scenes)):
-            images = sorted(glob.glob(osp.join(scene, 'image/*.png')))
-            depths = sorted(glob.glob(osp.join(scene, 'depth/*.npy')))
+            images = sorted(glob.glob(osp.join(scene, 'rgba*.png')))
+            depths = sorted(glob.glob(osp.join(scene, 'depth*.npy')))
             
-            poses = np.loadtxt(osp.join(scene, 'pose.txt'), delimiter=' ')
-            poses = poses[:, [1, 2, 0, 4, 5, 3, 6]]
+            with open(osp.join(scene, 'metadata.json')) as f:
+                metadata = json.load(f)
+            cam = metadata['camera']
+            W, H = metadata['metadata']['resolution']
+            K = cam['K']
+            poses = np.array(cam['poses'])
+            quaternions = np.array(cam['quaternions'])
+            poses = np.concatenate([poses, quaternions], axis=1)
+            poses[:, [1, 2]] = -poses[:, [1, 2]] # up to down, forward to backward
+            poses[:, [4, 5]] = -poses[:, [4, 5]] # up to down, forward to backward
             poses[:,:3] /= KubricStatic.DEPTH_SCALE
-            intrinsics = [KubricStatic.calib_read()] * len(images)
-
+            field_of_view = cam['field_of_view']
+            focal_length = cam['focal_length']
+            fx = 0.5 * W / np.tan(0.5 * float(field_of_view)) # need debub
+            fy = 0.5 * H / np.tan(0.5 * float(field_of_view))
+            cx = 0.5 * W
+            cy = 0.5 * H
+            intrinsics = np.array([fx, fy, cx, cy]) * len(images)
             # graph of co-visible frames based on flow
             graph = self.build_frame_graph(poses, depths, intrinsics)
 
@@ -55,7 +68,7 @@ class KubricStatic(RGBDDataset):
 
     @staticmethod
     def calib_read():
-        return np.array([320.0, 320.0, 320.0, 240.0])
+        return np.array([320.0, 320.0, 320.0, 240.0]) # fx fy cx cy
 
     @staticmethod
     def image_read(image_file):
@@ -87,16 +100,30 @@ class KubricDynamic(RGBDMotionDataset):
         print("Building KubricDynamic dataset")
 
         scene_info = {}
-        scenes = glob.glob(osp.join(self.root, '*/*/*/*'))
+        scenes = glob.glob(osp.join(self.root, '*'))
         for scene in tqdm(sorted(scenes)):
-            images = sorted(glob.glob(osp.join(scene, 'image/*.png')))
-            depths = sorted(glob.glob(osp.join(scene, 'depth/*.npy')))
-            movement_maps = sorted(glob.glob(osp.join(scene, 'movement/*.npy')))
+            images = sorted(glob.glob(osp.join(scene, 'rgba*.png')))
+            depths = sorted(glob.glob(osp.join(scene, 'depth*.npy')))
+            movement_maps = sorted(glob.glob(osp.join(scene, 'mask*.png')))
             
-            poses = np.loadtxt(osp.join(scene, 'pose.txt'), delimiter=' ')
-            poses = poses[:, [1, 2, 0, 4, 5, 3, 6]]
-            poses[:,:3] /= KubricDynamic.DEPTH_SCALE
-            intrinsics = [KubricDynamic.calib_read()] * len(images)
+            with open(osp.join(scene, 'metadata.json')) as f:
+                metadata = json.load(f)
+            cam = metadata['camera']
+            W, H = metadata['metadata']['resolution']
+            K = cam['K']
+            poses = np.array(cam['poses'])
+            quaternions = np.array(cam['quaternions'])
+            poses = np.concatenate([poses, quaternions], axis=1)
+            poses[:, [1, 2]] = -poses[:, [1, 2]] # up to down, forward to backward
+            poses[:, [4, 5]] = -poses[:, [4, 5]] # up to down, forward to backward
+            poses[:,:3] /= KubricStatic.DEPTH_SCALE
+            field_of_view = cam['field_of_view']
+            focal_length = cam['focal_length']
+            fx = 0.5 * W / np.tan(0.5 * float(field_of_view)) # need debub
+            fy = 0.5 * H / np.tan(0.5 * float(field_of_view))
+            cx = 0.5 * W
+            cy = 0.5 * H
+            intrinsics = np.array([fx, fy, cx, cy]) * len(images)
 
             # graph of co-visible frames based on flow
             graph = self.build_frame_graph(poses, depths, intrinsics)
@@ -106,10 +133,6 @@ class KubricDynamic(RGBDMotionDataset):
                 'poses': poses, 'intrinsics': intrinsics, 'graph': graph}
 
         return scene_info
-
-    @staticmethod
-    def calib_read():
-        return np.array([320.0, 320.0, 320.0, 240.0])
 
     @staticmethod
     def image_read(image_file):
@@ -136,10 +159,13 @@ class KubricStaticStream(RGBDStream):
         self.root = 'datasets/KubricStatic'
 
         scene = osp.join(self.root, self.datapath)
-        image_glob = osp.join(scene, 'image/*.png')
-        images = sorted(glob.glob(image_glob))
+        image_glob = osp.join(scene, 'rgba*.png')
+        images = sorted(glob.glob(image_glo))
 
         poses = np.loadtxt(osp.join(scene, 'pose.txt'), delimiter=' ')
+        with open(osp.join(scene, 'metadata.json')) as f:
+            metadata = json.load(f)
+
         poses = poses[:, [1, 2, 0, 4, 5, 3, 6]]
 
         poses = SE3(torch.as_tensor(poses))
@@ -172,23 +198,33 @@ class KubricStaticTestStream(RGBDStream):
         image_glob = osp.join(self.root, self.datapath, '*.png')
         images = sorted(glob.glob(image_glob))
 
-        poses = np.loadtxt(osp.join(self.root, 'mono_gt', self.datapath + '.txt'), delimiter=' ')
-        poses = poses[:, [1, 2, 0, 4, 5, 3, 6]]
+        with open(osp.join(scene, 'metadata.json')) as f:
+            metadata = json.load(f)
+        cam = metadata['camera']
+        W, H = metadata['metadata']['resolution']
+        K = cam['K']
+        poses = np.array(cam['poses'])
+        quaternions = np.array(cam['quaternions'])
+        poses = np.concatenate([poses, quaternions], axis=1)
+        poses[:, [1, 2]] = -poses[:, [1, 2]] # up to down, forward to backward
+        poses[:, [4, 5]] = -poses[:, [4, 5]] # up to down, forward to backward
+        field_of_view = cam['field_of_view']
+        focal_length = cam['focal_length']
+        fx = 0.5 * W / np.tan(0.5 * float(field_of_view)) # need debub
+        fy = 0.5 * H / np.tan(0.5 * float(field_of_view))
+        cx = 0.5 * W
+        cy = 0.5 * H
+        intrinsic = np.array([fx, fy, cx, cy]) * len(images)
 
         poses = SE3(torch.as_tensor(poses))
         poses = poses[[0]].inv() * poses
         poses = poses.data.cpu().numpy()
 
-        intrinsic = self.calib_read(self.datapath)
         intrinsics = np.tile(intrinsic[None], (len(images), 1))
 
         self.images = images[::int(self.frame_rate)]
         self.poses = poses[::int(self.frame_rate)]
         self.intrinsics = intrinsics[::int(self.frame_rate)]
-
-    @staticmethod
-    def calib_read(datapath):
-        return np.array([320.0, 320.0, 320.0, 240.0])
 
     @staticmethod
     def image_read(image_file):

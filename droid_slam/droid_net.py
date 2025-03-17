@@ -390,8 +390,10 @@ class DroidNet(nn.Module):
       )
 
       target = coords1 + delta
-
-      weight_ = weight
+      if motion_only:
+        weight_ = mot_prob
+      else:
+        weight_ = weight
 
       # Gs_init = Gs.detach()
       # disps_init = disps.clone()

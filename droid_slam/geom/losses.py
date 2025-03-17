@@ -116,3 +116,15 @@ def flow_loss(Ps, disps, poses_est, disps_est, intrinsics, graph, gamma=0.9):
     }
 
     return flow_loss, metrics
+
+
+def motion_loss(Ms, motions_est, gamma=0.9):
+    n = len(motions_est)
+    motion_loss = 0.0
+    for i in range(n):
+        w = gamma ** (n - i - 1)
+        motion_loss += w * torch.nn.functional.binary_cross_entropy(motions_est[i], Ms)
+
+    return motion_loss, {'motion': motion_loss.item()}
+
+    

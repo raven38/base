@@ -40,8 +40,8 @@ class TartanAir(RGBDDataset):
             images = sorted(glob.glob(osp.join(scene, 'image_left/*.png')))
             depths = sorted(glob.glob(osp.join(scene, 'depth_left/*.npy')))
             
-            poses = np.loadtxt(osp.join(scene, 'pose_left.txt'), delimiter=' ')
-            poses = poses[:, [1, 2, 0, 4, 5, 3, 6]]
+            poses = np.loadtxt(osp.join(scene, 'pose_left.txt'), delimiter=' ') # tx ty tz qx qy qz qs
+            poses = poses[:, [1, 2, 0, 4, 5, 3, 6]] # ty tz tx qy qz qx qw  .NED frame. That is to say, the x-axis is pointing to the camera's forward, the y-axis is pointing to the camera's right, the z-axis is pointing to the camera's downward.
             poses[:,:3] /= TartanAir.DEPTH_SCALE
             intrinsics = [TartanAir.calib_read()] * len(images)
 
@@ -56,7 +56,7 @@ class TartanAir(RGBDDataset):
 
     @staticmethod
     def calib_read():
-        return np.array([320.0, 320.0, 320.0, 240.0])
+        return np.array([320.0, 320.0, 320.0, 240.0])  # fx fy cx cy
 
     @staticmethod
     def image_read(image_file):
