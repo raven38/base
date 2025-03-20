@@ -52,7 +52,7 @@ def train_stage1(gpu, args):
     model.cuda()
     model.train()
 
-    model = DDP(model, device_ids=[gpu], find_unused_parameters=False)
+    model = DDP(model, device_ids=[gpu], find_unused_parameters=True)
 
     if args.ckpt is not None:
         model.load_state_dict(torch.load(args.ckpt))
@@ -110,7 +110,7 @@ def train_stage1(gpu, args):
                 r = rng.random()
                 
                 intrinsics0 = intrinsics / 8.0
-                poses_est, disps_est, residuals = model(Gs, images, disp0, intrinsics0, 
+                poses_est, disps_est, residuals, _, _ = model(Gs, images, disp0, None, intrinsics0, 
                     graph, num_steps=args.iters, fixedp=2)
 
                 geo_loss, geo_metrics = losses.geodesic_loss(Ps, poses_est, graph, do_scale=False)
@@ -146,6 +146,10 @@ def train_stage1(gpu, args):
                 break
 
     dist.destroy_process_group()
+    if gpu == 0:
+        PATH = 'checkpoints/%s_stage1.pth' % (args.name)
+        torch.save(model.state_dict(), PATH)
+
     return PATH
                 
 def train_stage2(gpu, args):
@@ -219,11 +223,11 @@ def train_stage2(gpu, args):
                 r = rng.random()
                 
                 intrinsics0 = intrinsics / 8.0
-                poses_est, disps_est, residuals, mot_prob, refined_w = model(Gs, images, disp0, intrinsics0, 
+                poses_est, disps_est, residuals, mot_prob, intrinsics = model(Gs, images, disp0, intrinsics0, 
                     graph, num_steps=args.iters, fixedp=2)
 
                 geo_loss, geo_metrics = losses.geodesic_loss(Ps, poses_est, graph, do_scale=False)
-                motion_loss, mot_metrics = losses.motion_loss(Ms, refined_w)
+                motion_loss, mot_metrics = losses.motion_loss(Ms, mot_prob)
 
                 loss = args.w1 * geo_loss + args.w4 * motion_loss
                 loss.backward()

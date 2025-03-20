@@ -81,6 +81,8 @@ class KubricStatic(RGBDDataset):
         depth = np.load(depth_file) / KubricStatic.DEPTH_SCALE
         depth[depth==np.nan] = 1.0
         depth[depth==np.inf] = 1.0
+        if len(depth.shape) > 2:
+                depth = depth.squeeze(2)
         return depth
     
 class KubricDynamic(RGBDMotionDataset):
@@ -145,6 +147,8 @@ class KubricDynamic(RGBDMotionDataset):
         depth = np.load(depth_file) / KubricDynamic.DEPTH_SCALE
         depth[depth==np.nan] = 1.0
         depth[depth==np.inf] = 1.0
+        if len(depth.shape) > 2:
+                depth = depth.squeeze(2)
         return depth
     
     @staticmethod

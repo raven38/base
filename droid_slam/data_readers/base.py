@@ -64,14 +64,15 @@ class RGBDDataset(data.Dataset):
 
     @staticmethod
     def depth_read(depth_file):
-        return np.load(depth_file)
+        depth = np.load(depth_file)
+        if len(depth.shape) > 2:
+                depth = depth.squeeze(2)
+        return depth
 
     def build_frame_graph(self, poses, depths, intrinsics, f=16, max_flow=256):
         """ compute optical flow distance between all pairs of frames """
         def read_disp(fn):
             depth = self.__class__.depth_read(fn)[f//2::f, f//2::f]
-            if len(depth.shape) > 2:
-                depth = depth.squeeze(2)
             depth[depth < 0.01] = np.mean(depth)
             return 1.0 / depth
 
@@ -208,7 +209,10 @@ class RGBDMotionDataset(data.Dataset):
 
     @staticmethod
     def depth_read(depth_file):
-        return np.load(depth_file)
+        depth = np.load(depth_file)
+        if len(depth.shape) > 2:
+                depth = depth.squeeze(2)
+        return depth
     
     @staticmethod
     def movement_map_read(movement_map_file):
@@ -289,7 +293,6 @@ class RGBDMotionDataset(data.Dataset):
         poses = torch.from_numpy(poses)
         intrinsics = torch.from_numpy(intrinsics)
         movement_maps = torch.from_numpy(movement_maps)
-
         if self.aug is not None:
             images, poses, disps, intrinsics, movement_maps = \
                 self.aug(images, poses, disps, intrinsics, movement_maps)
@@ -299,7 +302,6 @@ class RGBDMotionDataset(data.Dataset):
             s = disps[disps>0.01].mean()
             disps = disps / s
             poses[...,:3] *= s
-
         return images, poses, disps, intrinsics, movement_maps
 
     def __len__(self):
