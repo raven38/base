@@ -24,6 +24,10 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from geom.graph_utils import graph_to_edge_list, keyframe_indicies
+from torch_scatter import scatter_mean
+
+
 
 def setup_ddp(gpu, args):
     dist.init_process_group(                                   
@@ -79,6 +83,7 @@ def train_stage1(gpu, args):
             optimizer.zero_grad()
 
             images, poses, disps, intrinsics, *optinal_data = [x.to('cuda') if x is not None else None for x in item]
+            print('image1', images.shape)
             mono_depth = None
             if len(optinal_data) > 0:
                 mono_depth = optinal_data[0]
@@ -89,8 +94,8 @@ def train_stage1(gpu, args):
 
             # randomize frame graph
             if np.random.rand() < 0.5:
+                print('disp', disps.shape)
                 graph = build_frame_graph(poses, disps, intrinsics, num=args.edges)
-            
             else:
                 graph = OrderedDict()
                 for i in range(N):
@@ -110,9 +115,12 @@ def train_stage1(gpu, args):
                 r = rng.random()
                 
                 intrinsics0 = intrinsics / 8.0
+                print('image2', images.shape)
                 poses_est, disps_est, residuals, _, _ = model(Gs, images, disp0, None, intrinsics0, 
                     graph, num_steps=args.iters, fixedp=2)
-
+                print('disps_est', disps_est[0].shape)
+                print('poses_est', poses_est[0].shape, Ps.shape)
+                print('residuals', residuals[0].shape)
                 geo_loss, geo_metrics = losses.geodesic_loss(Ps, poses_est, graph, do_scale=False)
                 res_loss, res_metrics = losses.residual_loss(residuals)
                 flo_loss, flo_metrics = losses.flow_loss(Ps, disps, poses_est, disps_est, intrinsics, graph)
@@ -136,6 +144,9 @@ def train_stage1(gpu, args):
 
             if gpu == 0:
                 logger.push(metrics)
+
+            if total_steps % 100 == 0 and gpu == 0:
+                logger.write_images('disps', disps, disps_est[-1])
 
             if total_steps % 10000 == 0 and gpu == 0:
                 PATH = 'checkpoints/%s_stage1_%06d.pth' % (args.name, total_steps)
@@ -164,7 +175,7 @@ def train_stage2(gpu, args):
     model.cuda()
     model.train()
 
-    model = DDP(model, device_ids=[gpu], find_unused_parameters=False)
+    model = DDP(model, device_ids=[gpu], find_unused_parameters=True)
 
     if args.ckpt is not None:
         model.load_state_dict(torch.load(args.ckpt))
@@ -191,6 +202,8 @@ def train_stage2(gpu, args):
             optimizer.zero_grad()
 
             images, poses, disps, intrinsics, *optional_data = [x.to('cuda') if x is not None else None for x in item]
+            mono_depth = None
+            motion_masks = None
             if len(optional_data) > 0:
                 motion_masks = optional_data[-1]
             if len(optional_data) > 1:
@@ -200,6 +213,8 @@ def train_stage2(gpu, args):
             Ps = SE3(poses).inv()
             Gs = SE3.IdentityLike(Ps)
             Ms = motion_masks
+            batch_size, num_frames, H, W, C = Ms.shape
+            Ms = torch.nn.functional.interpolate(Ms.view(batch_size*num_frames, H, W,C).permute(0, 3, 1, 2), scale_factor=0.125, mode='bilinear').permute(0, 2, 3, 1).view(batch_size, num_frames, H//8, W//8, C).detach()
             # randomize frame graph
             if np.random.rand() < 0.5:
                 graph = build_frame_graph(poses, disps, intrinsics, num=args.edges)
@@ -223,10 +238,15 @@ def train_stage2(gpu, args):
                 r = rng.random()
                 
                 intrinsics0 = intrinsics / 8.0
-                poses_est, disps_est, residuals, mot_prob, intrinsics = model(Gs, images, disp0, intrinsics0, 
+                poses_est, disps_est, residuals, mot_prob, _ = model(Gs, images, disp0, None, intrinsics0, 
                     graph, num_steps=args.iters, fixedp=2)
 
                 geo_loss, geo_metrics = losses.geodesic_loss(Ps, poses_est, graph, do_scale=False)
+                ii, _, _ = graph_to_edge_list(graph)
+                ii = ii.to(device=mot_prob[0].device, dtype=torch.long)
+                _, ix = torch.unique(ii, return_inverse=True)
+                mot_prob = [scatter_mean(m, ix, dim=1) for m in mot_prob]
+
                 motion_loss, mot_metrics = losses.motion_loss(Ms, mot_prob)
 
                 loss = args.w1 * geo_loss + args.w4 * motion_loss
@@ -247,6 +267,10 @@ def train_stage2(gpu, args):
 
             if gpu == 0:
                 logger.push(metrics)
+
+            if total_steps % 100 == 0 and gpu == 0:
+                logger.write_images('motion_mask', Ms, mot_prob[-1])
+                logger.write_images('disps', disps, disps_est[-1])
 
             if total_steps % 10000 == 0 and gpu == 0:
                 PATH = 'checkpoints/%s_stage2_%06d.pth' % (args.name, total_steps)
@@ -282,6 +306,7 @@ if __name__ == '__main__':
     parser.add_argument('--w1', type=float, default=10.0)
     parser.add_argument('--w2', type=float, default=0.01)
     parser.add_argument('--w3', type=float, default=0.05)
+    parser.add_argument('--w4', type=float, default=0.1)
 
     parser.add_argument('--fmin', type=float, default=8.0)
     parser.add_argument('--fmax', type=float, default=96.0)

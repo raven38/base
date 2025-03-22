@@ -181,7 +181,7 @@ class GraphAggMotion(nn.Module):  # OLD VERSION
 
     net_2 = net_2.view(batch, num, self.dim, ht, wd)
     net = scatter_mean(net_2, ix, dim=1)
-
+    print('aggregated net', net.shape)
     if self.add_residual:
       raise NotImplementedError
       mot_prob = torch.nn.functional.relu(self.logits_2(net_5) + init_w_)
@@ -191,12 +191,15 @@ class GraphAggMotion(nn.Module):  # OLD VERSION
           net_2 + torch.index_select(net_5_avg, dim=1, index=ix.long())
       ).squeeze(0)
       refined_w = self.logits_2(net_5)
+      print('refined_w', refined_w.shape)
+      print('net 5', net_5.shape)
       mot_prob = refined_w * init_w_
       # mot_prob = (self.logits_2(net_5) + 1.) * init_w_
-
+    print('mot_prob', mot_prob.shape)
     mot_prob = (
         mot_prob.view(batch, num, 2, ht, wd).permute(0, 1, 3, 4, 2).contiguous()
     )
+    refined_w = refined_w.view(batch, num, 1, ht, wd).permute(0, 1, 3, 4, 2).contiguous()
     # upmask_m = self.upmask_2(net_5).view(batch, -1, 8*8*9, ht, wd)
     # upmask_m = None
 
@@ -290,16 +293,16 @@ class UpdateModule(nn.Module):
     weight = weight.permute(0, 1, 3, 4, 2)[..., :2].contiguous()
 
     net = net.view(*output_dim)
-
+    # print(net.shape)
     if ii is not None:
       eta, upmask_d = self.agg(net, ii.to(net.device))
-
+      print('agg output', eta.shape, upmask_d.shape)
       mot_prob = None
       upmask_m = None
       new_eta, mot_prob, refined_w = self.agg_motion(
           net, ii.to(net.device), weight, eta, disps_sensor
       )
-
+      # print(net.shape, delta.shape, weight.shape, eta.shape, mot_prob.shape, refined_w.shape)
       return net, delta, weight, eta, upmask_d, mot_prob, refined_w
       # return net, delta, weight, new_eta, upmask_d, reg_prob, upmask_r, mot_prob, refined_w
 
@@ -350,16 +353,14 @@ class DroidNet(nn.Module):
       motion_only=False,
   ):
     """Estimates SE3 or Sim3 between pair of frames"""
+    # print(graph)
     u = keyframe_indicies(graph)
     ii, jj, kk = graph_to_edge_list(graph)
 
     ii = ii.to(device=images.device, dtype=torch.long)
     jj = jj.to(device=images.device, dtype=torch.long)
-
     fmaps, net, inp = self.extract_features(images)
-
     net, inp = net[:, ii], inp[:, ii]
-
     corr_fn = CorrBlock(fmaps[:, ii], fmaps[:, jj], num_levels=4, radius=3)
 
     ht, wd = images.shape[-2:]
@@ -384,7 +385,6 @@ class DroidNet(nn.Module):
 
       motion = torch.cat([flow, resd], dim=-1)
       motion = motion.permute(0, 1, 4, 2, 3).clamp(-64.0, 64.0)
-
       net, delta, weight, eta, upmask_d, mot_prob, upmask_m = self.update(
           net, inp, corr, motion, ii, jj, disps, disps_sensor
       )
@@ -423,7 +423,7 @@ class DroidNet(nn.Module):
       #             reg_type=self.reg_type, fixedp=fixedp)
 
       # breakpoint()
-      print("intrinsics ", intrinsics_init, intrinsics)
+      # print("intrinsics ", intrinsics_init, intrinsics)
 
       coords1, valid_mask = pops.projective_transform(
           Gs, disps, intrinsics, ii, jj
@@ -431,9 +431,10 @@ class DroidNet(nn.Module):
       residual = target - coords1
 
       Gs_list.append(Gs)
+
       disp_list.append(upsample_disp(disps, upmask_d))
       residual_list.append(valid_mask * residual)
       intrinsic_list.append(intrinsics + 0.0)
-      mot_mask_list.append(torch.clamp(weight_, 0.0, 1.0))
+      mot_mask_list.append(torch.clamp(upmask_m, 0.0, 1.0))
 
     return Gs_list, disp_list, residual_list, mot_mask_list, intrinsic_list
