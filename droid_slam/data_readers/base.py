@@ -216,7 +216,7 @@ class RGBDMotionDataset(data.Dataset):
     
     @staticmethod
     def movement_map_read(movement_map_file):
-        return cv2.imread(movement_map_file)
+        return cv2.imread(movement_map_file, cv2.IMREAD_GRAYSCALE)
 
     def build_frame_graph(self, poses, depths, intrinsics, f=16, max_flow=256):
         """ compute optical flow distance between all pairs of frames """
@@ -292,7 +292,10 @@ class RGBDMotionDataset(data.Dataset):
         disps = torch.from_numpy(1.0 / depths)
         poses = torch.from_numpy(poses)
         intrinsics = torch.from_numpy(intrinsics)
-        movement_maps = torch.from_numpy(movement_maps).float() / 255.0 
+        movement_maps = (torch.from_numpy(movement_maps).float() / 255.0).unsqueeze(-1)
+
+        print('disps', disps.shape, 'poses', poses.shape, 'intrinstics', intrinsics.shape, movement_maps.shape)
+
         if self.aug is not None:
             images, poses, disps, intrinsics, movement_maps = \
                 self.aug(images, poses, disps, intrinsics, movement_maps)

@@ -153,7 +153,7 @@ class KubricDynamic(RGBDMotionDataset):
     
     @staticmethod
     def movement_map_read(movement_file):
-        return cv2.imread(movement_file)
+        return cv2.imread(movement_file, cv2.IMREAD_GRAYSCALE)
 
 
 class KubricStaticStream(RGBDStream):
