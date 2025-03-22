@@ -1,7 +1,7 @@
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
-
+from torchvision.utils import make_grid
 
 SUM_FREQ = 100
 
@@ -48,6 +48,14 @@ class Logger:
     def write_dict(self, results):
         for key in results:
             self.writer.add_scalar(key, results[key], self.total_steps)
+
+    def write_images(self, key, gts, preds):
+        for gt, pred in zip(gts, preds):
+            num_frames = gt.shape[0]
+            gt = make_grid(gt, nrow=num_frames, normalize=True)
+            pred = make_grid(pred, nrow=num_frames, normalize=True)
+            self.writer.add_image(key, torch.stack([gt, pred], dim=0), self.total_steps)
+
 
     def close(self):
         self.writer.close()
