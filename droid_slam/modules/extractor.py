@@ -199,12 +199,9 @@ class BasicEncoder(nn.Module):
     x = self.conv1(x)
     x = self.norm1(x)
     x = self.relu1(x)
-
     x = self.layer1(x)
     x = self.layer2(x)
     x = self.layer3(x)
-
     x = self.conv2(x)
-
     _, c2, h2, w2 = x.shape
     return x.view(b, n, c2, h2, w2)

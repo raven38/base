@@ -35,7 +35,6 @@ def neighbourhood_graph(n, r):
   return ii[keep], jj[keep]
 
 
-
 def build_frame_graph(poses, disps, intrinsics, num=16, thresh=24.0, r=2):
     """ construct a frame graph between co-visible frames """
     N = poses.shape[1]
